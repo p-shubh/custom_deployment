@@ -19,11 +19,14 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Install curl
-      run: sudo apt-get install -y curl
+    - name: Install required tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y curl jq
 
-    - name: Make API Call
+    - name: Make API Call and Format Response
       run: |
         echo "Calling API: https://app.myriadflow.com/brands/all"
         response=$(curl -s -X GET "https://app.myriadflow.com/brands/all")
-        echo "Response: $response"
+        echo "Formatted Response:"
+        echo "$response" | jq
