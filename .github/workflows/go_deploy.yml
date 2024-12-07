@@ -1,0 +1,174 @@
+name: Dynamic Repository Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_name:
+        description: 'GitHub Repository Name (username/repo-name)'
+        required: true
+        type: string
+      language:
+        description: 'Programming Language'
+        required: true
+        type: choice
+        options:
+          - python
+          - javascript
+          - typescript
+          - go
+          - rust
+          - java
+          - cpp
+          - c
+          - ruby
+          - other
+      branch:
+        description: 'Branch to deploy'
+        required: false
+        default: 'main'
+        type: string
+
+jobs:
+  prepare-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Validate Input
+      run: |
+        echo "Deploying repository: ${{ github.event.inputs.repo_name }}"
+        echo "Language: ${{ github.event.inputs.language }}"
+        echo "Branch: ${{ github.event.inputs.branch }}"
+    
+    - name: Clone Repository
+      run: |
+        git clone https://github.com/${{ github.event.inputs.repo_name }}.git repo
+        cd repo
+        git checkout ${{ github.event.inputs.branch }}
+    
+    - name: Setup Build Environment
+      uses: actions/setup-python@v3
+      with:
+        python-version: '3.9'
+    
+    - name: Detect and Prepare Build
+      id: build-prep
+      run: |
+        cd repo
+        
+        # Language-specific build preparations
+        case "${{ github.event.inputs.language }}" in
+          python)
+            if [ -f "requirements.txt" ]; then
+              pip install -r requirements.txt
+            fi
+            if [ -f "setup.py" ]; then
+              python setup.py build
+            fi
+            ;;
+          
+          javascript|typescript)
+            if [ -f "package.json" ]; then
+              npm install
+              npm run build
+            fi
+            ;;
+          
+          go)
+            go build
+            ;;
+          
+          rust)
+            cargo build --release
+            ;;
+          
+          java)
+            if [ -f "pom.xml" ]; then
+              mvn clean package
+            elif [ -f "build.gradle" ]; then
+              gradle build
+            fi
+            ;;
+          
+          cpp|c)
+            cmake .
+            make
+            ;;
+          
+          ruby)
+            bundle install
+            bundle exec rake build
+            ;;
+          
+          *)
+            echo "No specific build process defined for this language"
+            ;;
+        esac
+    
+    - name: Find Deployment Artifact
+      id: find-artifact
+      run: |
+        cd repo
+        
+        # Attempt to find a suitable binary or artifact
+        case "${{ github.event.inputs.language }}" in
+          python)
+            find . -type f -executable | grep -E "\.py$|dist/|build/"
+            ;;
+          
+          javascript|typescript)
+            find . -type f | grep -E "dist/|build/|index.js"
+            ;;
+          
+          go)
+            find . -type f -executable | grep -E "go$|bin/"
+            ;;
+          
+          rust)
+            find target/release -type f -executable
+            ;;
+          
+          java)
+            find . -type f -name "*.jar"
+            ;;
+          
+          cpp|c)
+            find . -type f -executable | grep -E "bin/|build/"
+            ;;
+          
+          ruby)
+            find . -type f -executable | grep -E "bin/|pkg/"
+            ;;
+          
+          *)
+            echo "No artifact detection for this language"
+            ;;
+        esac
+    
+    - name: Deploy to Server
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.SERVER_SSH_PRIVATE_KEY }}
+        SERVER_HOST: ${{ secrets.SERVER_HOST }}
+        SERVER_USER: ${{ secrets.SERVER_USERNAME }}
+        DEPLOY_PATH: ${{ secrets.SERVER_DEPLOY_PATH }}
+      run: |
+        # Prepare SSH
+        mkdir -p ~/.ssh
+        echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H $SERVER_HOST >> ~/.ssh/known_hosts
+        
+        # Find the first executable artifact
+        ARTIFACT=$(find repo -type f -executable | head -n 1)
+        
+        if [ -z "$ARTIFACT" ]; then
+          echo "No deployable artifact found"
+          exit 1
+        fi
+        
+        # Copy artifact to server
+        scp -i ~/.ssh/id_rsa "$ARTIFACT" $SERVER_USER@$SERVER_HOST:$DEPLOY_PATH
+        
+        # Set executable permissions
+        ssh -i ~/.ssh/id_rsa $SERVER_USER@$SERVER_HOST "chmod +x $DEPLOY_PATH/$(basename "$ARTIFACT")"
+        
+        echo "Deployment completed successfully"
