@@ -1,0 +1,21 @@
+name: API Call Workflow
+
+on:
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  api-call-job:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Install curl
+      run: sudo apt-get install -y curl
+
+    - name: Make API Call
+      run: |
+        echo "Calling API: https://app.myriadflow.com/brands/all"
+        response=$(curl -s -X GET "https://app.myriadflow.com/brands/all")
+        echo "Response: $response"
